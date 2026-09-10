@@ -4,11 +4,11 @@ Zero-cost, direct institutional filing access.
 """
 import json
 import re
+import warnings
 from edgar import set_identity, Company
 from langchain_core.tools import tool
 from config.settings import settings
 
-# SEC EDGAR requires a declared User-Agent identity
 set_identity(settings.SEC_IDENTITY)
 
 
@@ -40,23 +40,24 @@ def fetch_sec_risk_disclosures(ticker: str) -> str:
         
         extracted_text = ""
 
-        # Strategy 1: edgartools native item accessor
-        try:
-            item_1a_chunk = latest_10k.obj()["Item 1A"]
-            if item_1a_chunk:
-                extracted_text = str(item_1a_chunk)
-        except Exception:
-            extracted_text = ""
+        # Strategy 1: Safe extraction without raising edgartools FutureWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            try:
+                obj = latest_10k.obj()
+                if obj and hasattr(obj, "items") and "Item 1A" in obj.items:
+                    item_1a_chunk = obj["Item 1A"]
+                    if item_1a_chunk:
+                        extracted_text = str(item_1a_chunk)
+            except Exception:
+                extracted_text = ""
 
-        # Strategy 2: If too short or failed, scan raw text ignoring Table of Contents
+        # Strategy 2: Text regex scanning for Item 1A body
         if len(extracted_text.strip()) < 100:
             full_text = latest_10k.text() or ""
-            
-            # Find all occurrences of Item 1A to skip TOC entries
             matches = list(re.finditer(r'(Item\s+1A[\.\:\s\-\–]+Risk\s+Factors)', full_text, re.IGNORECASE))
             
             if len(matches) > 1:
-                # Take the second or later occurrence (actual body chapter, not TOC)
                 start_pos = matches[1].start()
                 body_chunk = full_text[start_pos:start_pos + 6000]
             elif len(matches) == 1:
@@ -68,8 +69,6 @@ def fetch_sec_risk_disclosures(ticker: str) -> str:
             extracted_text = body_chunk
 
         cleaned = _clean_filing_text(extracted_text)
-        
-        # Keep top 2,500 characters: dense enough for risk points, fast on local CPU
         trimmed_excerpt = cleaned[:2500]
 
         payload = {
