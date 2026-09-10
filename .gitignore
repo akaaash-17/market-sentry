@@ -1,0 +1,30 @@
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# LangGraph & SQLite Checkpoints
+*.db
+*.sqlite
+*.sqlite3
+market_sentry_state.db
+
+# Environment & Secret Keys
+.env
+.env.local
+
+# IDE & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit Cache
+.streamlit/

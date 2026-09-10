@@ -1,0 +1,7 @@
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-ollama>=0.2.0
+yfinance>=0.2.40
+edgartools>=2.15.0
+pydantic>=2.0.0
+rich>=13.0.0
