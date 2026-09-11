@@ -1,14 +1,16 @@
 """
-Skeptic Arbiter Node with Hybrid Verification:
+Skeptic Arbiter Node with Hybrid Verification & ChromaDB Semantic Memory:
 1. Deterministic Python metric verification (math/ground-truth checks).
-2. LLM qualitative audit & synthesis.
+2. Semantic historical event retrieval via ChromaDB.
+3. LLM qualitative audit & synthesis.
 """
 import json
 import re
-from typing import List, Tuple
+from typing import List
 from langchain_ollama import ChatOllama
 from config.settings import settings
 from src.state import MarketGraphState, AuditCritique, FinalInvestmentMemo, AgentThesis
+from src.memory.historical_memory import query_analogous_events, record_investigated_event
 
 
 def _extract_numbers(text: str) -> List[float]:
@@ -35,22 +37,17 @@ def verify_claims_deterministically(thesis: AgentThesis, raw_market_json: str) -
 
     try:
         ground_truth = json.loads(raw_market_json)
-        # Flatten all values in ground truth into searchable string tokens
         raw_text_corpus = json.dumps(ground_truth).lower()
 
         for point in thesis.key_points:
             claim_text = f"{point.point} {point.metric_or_citation}".lower()
             numbers_in_claim = _extract_numbers(claim_text)
             
-            # Check if cited numbers appear in the ground truth
             for num in numbers_in_claim:
-                # Format to standard decimals to check inclusion
                 num_str_short = f"{num:.2f}".rstrip('0').rstrip('.')
                 int_str = str(int(num)) if num.is_integer() else None
 
                 matched = (num_str_short in raw_text_corpus) or (int_str and int_str in raw_text_corpus)
-                
-                # If citation points to a metric name, check its presence
                 citation_key = point.metric_or_citation.strip().lower()
                 key_found = any(k in raw_text_corpus for k in citation_key.split())
 
@@ -59,8 +56,7 @@ def verify_claims_deterministically(thesis: AgentThesis, raw_market_json: str) -
                         f"Unverified number [{num}] in claim: '{point.point}'"
                     )
                     break
-    except Exception as e:
-        # Fallback if parsing fails
+    except Exception:
         pass
 
     return unsubstantiated
@@ -97,7 +93,7 @@ def audit_thesis_node(state: MarketGraphState) -> dict:
         "You are an impartial Chief Compliance and Fact-Checking Officer. "
         "Review the Bull and Bear claims against ground-truth data.\n"
         "Rules:\n"
-        "1. Flag any claims that twist facts or cite figures not in the ground-truth data.\n"
+        "1. Flag any claims that cite figures not present in ground-truth data.\n"
         "2. If deterministic verification flags exist, incorporate them into unsubstantiated_claims.\n"
         "3. Set passes_audit=True ONLY if both stances are grounded."
     )
@@ -117,11 +113,9 @@ def audit_thesis_node(state: MarketGraphState) -> dict:
         ("user", user_content)
     ])
 
-    # Merge deterministic findings
     combined_flags = list(set(critique.unsubstantiated_claims + deterministic_flags))
     critique.unsubstantiated_claims = combined_flags
     
-    # If deterministic flags exist, audit cannot pass
     if deterministic_flags:
         critique.passes_audit = False
 
@@ -136,8 +130,18 @@ def audit_thesis_node(state: MarketGraphState) -> dict:
 
 def synthesize_memo_node(state: MarketGraphState) -> dict:
     """
-    Synthesizes the verified debate into an institutional CIO trade memo.
+    Synthesizes the verified debate into an institutional CIO trade memo,
+    enriching the context with semantic historical precedents from ChromaDB.
     """
+    ticker = state["ticker"]
+    bull = state.get("bull_thesis")
+    bear = state.get("bear_thesis")
+
+    # Retrieve semantic historical analogues from ChromaDB
+    query_context = f"{ticker}: {bull.summary if bull else ''} {bear.summary if bear else ''}"
+    analogues = query_analogous_events(query_context, k=2)
+    analogues_formatted = "\n".join([f"- {a['event_summary']} (Score: {a['distance_score']})" for a in analogues])
+
     llm = ChatOllama(
         model=settings.OLLAMA_MODEL,
         base_url=settings.OLLAMA_BASE_URL,
@@ -149,15 +153,15 @@ def synthesize_memo_node(state: MarketGraphState) -> dict:
 
     system_prompt = (
         "You are the Chief Investment Officer (CIO) of a quantitative fund. "
-        "Synthesize the audited Bull and Bear theses into an actionable Investment Memo. "
+        "Synthesize the audited Bull and Bear theses and analogous historical precedents into an Investment Memo. "
         "Assign an institutional verdict: 'OVERWEIGHT', 'NEUTRAL', or 'UNDERWEIGHT'."
     )
 
     user_content = (
-        f"Ticker: {state['ticker']}\n\n"
-        f"Bull Thesis:\n{state['bull_thesis'].model_dump_json() if state.get('bull_thesis') else ''}\n\n"
-        f"Bear Thesis:\n{state['bear_thesis'].model_dump_json() if state.get('bear_thesis') else ''}\n\n"
-        f"Audit History:\n{[c.model_dump_json() for c in state.get('audit_history', [])]}\n\n"
+        f"Ticker: {ticker}\n\n"
+        f"Historical Event Analogues (Retrieved via ChromaDB):\n{analogues_formatted}\n\n"
+        f"Audited Bull Thesis:\n{bull.model_dump_json() if bull else ''}\n\n"
+        f"Audited Bear Thesis:\n{bear.model_dump_json() if bear else ''}\n\n"
         "Generate the FinalInvestmentMemo."
     )
 
@@ -165,5 +169,16 @@ def synthesize_memo_node(state: MarketGraphState) -> dict:
         ("system", system_prompt),
         ("user", user_content)
     ])
+
+    # Persist the newly investigated event into ChromaDB for future memory
+    try:
+        record_investigated_event(
+            ticker=ticker,
+            trigger_summary=f"Bull: {bull.summary[:100] if bull else ''} | Bear: {bear.summary[:100] if bear else ''}",
+            final_verdict=memo.verdict,
+            rationale=memo.synthesis_memo
+        )
+    except Exception:
+        pass
 
     return {"final_memo": memo}

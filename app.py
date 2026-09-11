@@ -1,12 +1,16 @@
 """
 MarketSentry - Interactive Financial Intelligence & Sentinel Dashboard
-Zero-cost, local multi-agent LangGraph application.
+Zero-cost, local multi-agent LangGraph application with ChromaDB Semantic Memory.
 """
 import streamlit as st
 import uuid
 import pandas as pd
 from src.graph import build_market_sentry_graph
 from src.tools.anomaly_detector import MarketSentinel
+from src.memory.historical_memory import seed_baseline_market_events, query_analogous_events
+
+# Seed baseline events once per session
+seed_baseline_market_events()
 
 st.set_page_config(
     page_title="MarketSentry | Autonomous Agent Graph",
@@ -15,20 +19,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Institutional styling
 st.markdown("""
 <style>
     .main { background-color: #0b0f19; }
     .stMetric { background-color: #161f30; padding: 15px; border-radius: 8px; border: 1px solid #22324d; }
-    .anomaly-card { background-color: #2b1111; padding: 15px; border-radius: 8px; border: 1px solid #7f1d1d; }
+    .memory-box { background-color: #1a2333; padding: 12px; border-radius: 6px; border-left: 4px solid #38bdf8; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🛡️ MarketSentry")
-st.caption("Autonomous Adversarial Market Intelligence Graph • Statistical Sentinel • 100% Local Inference")
+st.caption("Autonomous Adversarial Market Intelligence Graph • ChromaDB Semantic Memory • 100% Local Inference")
 
-# Navigation Modes
-mode = st.sidebar.radio("Navigation Mode", ["🎯 Deep Dive Audit", "📡 Sentinel Anomaly Scanner"])
+mode = st.sidebar.radio("Navigation Mode", ["🎯 Deep Dive Audit", "📡 Sentinel Anomaly Scanner", "🧠 ChromaDB Historical Precedents"])
 
 WATCHLIST = ["NVDA", "TSLA", "AAPL", "MSFT", "GOOGL", "AMZN", "AMD"]
 
@@ -70,7 +72,7 @@ if mode == "🎯 Deep Dive Audit":
                         status_container.write(f"⚠ Skeptic Arbiter [Round {round_num}]: CHALLENGED. Triggered reflection loop.")
                     final_state["audit_history"] = audits
                 elif node_name == "synthesize_memo":
-                    status_container.write(f"✓ CIO Synthesis: Final institutional trade allocation compiled.")
+                    status_container.write(f"✓ CIO Synthesis: Final institutional trade allocation compiled via ChromaDB memory.")
                     final_state["final_memo"] = node_state.get("final_memo")
 
         status_container.update(label=f"Forensic Audit Complete: {ticker_input}", state="complete", expanded=False)
@@ -89,9 +91,9 @@ if mode == "🎯 Deep Dive Audit":
             with c2:
                 st.error(f"**Primary Risk Vector:**\n\n{memo.primary_risk}")
 
-            st.info(f"**CIO Executive Rationale:**\n\n{memo.synthesis_memo}")
+            st.info(f"**CIO Executive Rationale (Grounded in SEC & ChromaDB Precedents):**\n\n{memo.synthesis_memo}")
 
-        tab_bull, tab_bear, tab_audit = st.tabs(["🟢 Bullish Thesis", "🔴 Bearish Thesis", "🔍 Audit History"])
+        tab_bull, tab_bear, tab_memory, tab_audit = st.tabs(["🟢 Bullish Thesis", "🔴 Bearish Thesis", "🧠 Historical Precedents", "🔍 Audit History"])
 
         with tab_bull:
             bull = final_state.get("bull_thesis")
@@ -104,6 +106,17 @@ if mode == "🎯 Deep Dive Audit":
             if bear:
                 st.markdown(f"**Summary:** {bear.summary}")
                 st.dataframe([{"Risk Vector": p.point, "SEC Citation": p.metric_or_citation, "Confidence": f"{p.confidence_score*100:.0f}%"} for p in bear.key_points], use_container_width=True)
+
+        with tab_memory:
+            st.markdown("### Semantically Analogous Events Retrieved from ChromaDB")
+            retrieved = query_analogous_events(f"{ticker_input} market thesis", k=3)
+            for item in retrieved:
+                st.markdown(f"""
+                <div class="memory-box">
+                    <strong>Event:</strong> {item['event_summary']}<br>
+                    <small>Metadata: {item['metadata']} | Distance Score: {item['distance_score']}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with tab_audit:
             audits = final_state.get("audit_history", [])
@@ -142,3 +155,21 @@ elif mode == "📡 Sentinel Anomaly Scanner":
                     st.write(f"- {t}")
         else:
             st.success("✓ All watchlist assets trading within normal volatility distributions.")
+
+# ---------------------------------------------------------------------------
+# MODE 3: HISTORICAL PRECEDENTS INSPECTOR
+# ---------------------------------------------------------------------------
+elif mode == "🧠 ChromaDB Historical Precedents":
+    st.subheader("🧠 ChromaDB Semantic Precedents Browser")
+    st.caption("Directly query MarketSentry's dense vector index using nomic-embed-text embeddings.")
+
+    query = st.text_input("Semantic Query", value="capex expansion and artificial intelligence infrastructure")
+    if st.button("Search Precedents", type="primary"):
+        results = query_analogous_events(query, k=4)
+        for r in results:
+            st.markdown(f"""
+            <div class="memory-box">
+                <strong>Precedent:</strong> {r['event_summary']}<br>
+                <small>Metadata: {r['metadata']} | Cosine Distance: {r['distance_score']}</small>
+            </div>
+            """, unsafe_allow_html=True)
